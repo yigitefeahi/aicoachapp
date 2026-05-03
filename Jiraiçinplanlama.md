@@ -2,7 +2,7 @@
 
 Bu doküman, `upschool301prdmvpdocument.md` PRD’sindeki MVP kapsamını **Epic → Story → Task** hiyerarşisiyle parçalar. Jira’da Epic ve Story tipleri, alt işler ise Task/Sub-task olarak açılabilir.
 
-**Repo / ürün:** aicoachapp (mobil odaklı teslimat; PRD’deki web/responsive yaklaşımı mobil ekranlara uyarlanır.)
+**Repo / ürün:** aicoachapp (web odaklı teslimat; PRD’deki web/responsive yaklaşımı tarayıcı ekranlarına uygulanır.)
 
 **Referans:** PRD bölüm 6 (MVP), 7 (User Flow), 8 (Tech Approach).
 
@@ -26,11 +26,11 @@ Bu doküman, `upschool301prdmvpdocument.md` PRD’sindeki MVP kapsamını **Epic
 
 **Amaç:** Uygulama kabuğu, navigasyon, yapılandırma ve kullanıcı oturumu (PRD akışı: giriş → CV → rol → izinler).
 
-### Story 1.1 — Repo ve mobil proje kurulumu
+### Story 1.1 — Repo ve web frontend proje kurulumu
 
 | ID | Task | Kabul kriteri |
 |----|------|----------------|
-| T1.1.1 | Teknoloji yığını seçimi ve proje iskeleti (ör. React Native / Expo veya Flutter) dokümante | Çalışan boş ekran, build alınıyor |
+| T1.1.1 | Teknoloji yığını seçimi ve proje iskeleti (React + TypeScript + Vite) dokümante | Çalışan web ekranı, build alınıyor |
 | T1.1.2 | Ortam değişkenleri ve gizli anahtar yönetimi (API URL, AI anahtarları için güvenli depolama) | Prod/dev ayrımı net |
 | T1.1.3 | Temel navigasyon (onboarding / ana akış iskeleti) | PRD user flow adımları ekranlara map’lendi |
 
@@ -193,7 +193,7 @@ Bu doküman, `upschool301prdmvpdocument.md` PRD’sindeki MVP kapsamını **Epic
 |----|------|----------------|
 | T9.1 | Kritik akış E2E testi (giriş → CV → rol → kısa mülakat → sonuç) | Ana yol yeşil |
 | T9.2 | İzin reddi, ağ kesintisi, boş CV senaryoları | Kullanıcı kırılmıyor |
-| T9.3 | Store / dağıtım pipeline (iOS/Android) | Sürüm adayı üretilebiliyor |
+| T9.3 | Web deployment pipeline (Vite build + hosting) | Sürüm adayı üretilebiliyor |
 
 ---
 

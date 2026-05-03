@@ -1,12 +1,12 @@
 ---
 name: AI Coach App plan
-overview: "CV bazli kisisellestirilmis AI mulakat simulasyonu sunan mobil uygulama icin asamali urun ve teknik gelistirme plani. Kapsam: CV analizi, dinamik soru motoru, sesli/video mulakat, skor ve geri bildirim dongusu."
+overview: "CV bazli kisisellestirilmis AI mulakat simulasyonu sunan web uygulamasi icin asamali urun ve teknik gelistirme plani. Kapsam: CV analizi, dinamik soru motoru, sesli/video mulakat, skor ve geri bildirim dongusu."
 todos:
   - id: confirm-scope
     content: MVP kapsamini netlestir (Interview Coach core + mini learning modulu opsiyonel)
     status: pending
   - id: define-stack
-    content: Mobil teknoloji yigini ve backend mimarisini kesinlestir
+    content: Web teknoloji yigini ve backend mimarisini kesinlestir
     status: pending
   - id: setup-foundation
     content: Proje iskeleti, auth, temel navigasyon ve izin akislarini kur
@@ -38,7 +38,7 @@ isProject: true
 Kullanicinin CV'si ve hedef rolune gore gercekci bir mulakat simulasyonu uretmek; ses/video sinyallerini de kullanarak icerik, iletisim ve ozguven odakli geri bildirim vermek.
 
 ## Varsayimlar
-- Ilk surum mobil odakli (iOS/Android).
+- Ilk surum web odakli ve responsive tasarlanir.
 - Kullanici giris yapar, CV yukler, rol secer ve mulakati baslatir.
 - AI servisleri (CV parsing, soru uretimi, feedback) backend uzerinden orkestre edilir.
 - Video/ses analizleri MVP'de "basic" seviyede tutulur (yuksek dogruluk yerine calisir uctan uca akis oncelikli).
@@ -57,8 +57,8 @@ Kullanicinin CV'si ve hedef rolune gore gercekci bir mulakat simulasyonu uretmek
 
 ## Onerilen teknik mimari
 
-- Mobil istemci:
-  - React Native + Expo (alternatif: Flutter)
+- Web istemci:
+  - React + TypeScript + Vite
   - State: Zustand/Redux Toolkit
   - Data fetching: TanStack Query
 - Backend:
@@ -93,7 +93,7 @@ Kullanicinin CV'si ve hedef rolune gore gercekci bir mulakat simulasyonu uretmek
 ## Gelistirme fazlari
 
 ### Faz 1 - Temel iskelet ve auth
-- Mobil proje kurulumu
+- Web frontend proje kurulumu
 - Ortam yapilandirmasi (dev/stage/prod)
 - Giris/kayit/oturum yonetimi
 - Kamera/mikrofon izin akislari
