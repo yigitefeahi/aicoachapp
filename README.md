@@ -1,10 +1,36 @@
 # AI Coach App
 
-AI Coach App, CV ve hedef role gore yapay zeka destekli mulakat simulasyonu sunan bir urun icin temel full-stack iskeletidir.
+AI Coach App, CV ve hedef role gore yapay zeka destekli mulakat simulasyonu sunan bir full-stack mulakat pratik uygulamasidir.
+
+## Screenshots
+
+### Home
+
+![AI Coach home screen](docs/screenshots/home.jpeg)
+
+### Dashboard
+
+![AI Coach dashboard](docs/screenshots/dashboard.jpeg)
+
+### Practice Hub
+
+![AI Coach practice hub](docs/screenshots/practice-hub.jpeg)
+
+### Interview Setup
+
+![AI Coach interview setup](docs/screenshots/interview-setup.jpeg)
+
+### Roadmap
+
+![AI Coach roadmap](docs/screenshots/roadmap.jpeg)
+
+### Settings
+
+![AI Coach settings](docs/screenshots/settings.jpeg)
 
 ## Project Structure
 
-- `frontend/`: React + TypeScript + Vite tabanli istemci
+- `frontend/`: Next.js + React + TypeScript tabanli istemci
 - `backend/`: FastAPI tabanli API
 - `aicoachapp.plan.md`: Yol haritasi ve teknik plan
 - `Jiraiçinplanlama.md`: Epic/Story/Task kirilimi
@@ -38,7 +64,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Frontend varsayilan olarak `http://127.0.0.1:5173` uzerinde calisir.
+Frontend varsayilan olarak `http://localhost:3000` uzerinde calisir.
 
 ## Quick Start
 
