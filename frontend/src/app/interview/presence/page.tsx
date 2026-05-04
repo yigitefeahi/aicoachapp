@@ -1,0 +1,682 @@
+"use client";
+
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Circle,
+  Mic,
+  Play,
+  Send,
+  Square,
+  UserRound,
+  Volume2,
+} from "lucide-react";
+import { apiFetch, API_BASE, buildAuthHeaders } from "@/lib/api";
+import { safeText, speakableText } from "@/lib/safe-text";
+import { applyEnglishSpeechVoice } from "@/lib/browser-tts-en";
+import { buildSessionContextLine } from "@/lib/question-display";
+import { SessionControlBar } from "@/components/session-control-bar";
+import { SessionStatsCards } from "@/components/live/session-stats-cards";
+import { CoachPanel } from "@/components/live/coach-panel";
+import { InterviewerAvatar } from "@/components/live/interviewer-avatar";
+import { InterviewQuestionHero } from "@/components/live/interview-question-hero";
+
+type SubmitResponse = {
+  next_question: string | null;
+  pending_next_question?: string | null;
+  question_context?: string | null;
+  feedback: string;
+  score: number;
+  done: boolean;
+  can_retry?: boolean;
+  attempts_left?: number;
+  confidence_score?: number;
+  red_flags?: string[];
+  passes_left?: number;
+  question_index?: number;
+  total_questions?: number;
+  sub_scores?: Record<string, number>;
+  strengths?: string[];
+  weaknesses?: string[];
+  suggestions?: string[];
+  score_explanation?: string;
+};
+
+type SpeechResultEventLike = {
+  results: ArrayLike<ArrayLike<{ transcript?: string }>>;
+};
+
+type SpeechRecognitionLike = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechResultEventLike) => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionCtorLike = new () => SpeechRecognitionLike;
+
+const MODE = "presence";
+
+function PresenceInterviewPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [sessionQuestionContext, setSessionQuestionContext] = useState(
+    () => searchParams.get("questionContext") || ""
+  );
+
+  const sessionId = searchParams.get("session_id") || "";
+  const profession = searchParams.get("profession") || "Frontend Developer";
+  const difficulty = searchParams.get("difficulty") || "Junior";
+  const length = searchParams.get("length") || "10 Questions";
+  const focusArea = searchParams.get("focusArea") || "Mixed";
+  const sector = searchParams.get("sector") || "";
+  const targetCompany = searchParams.get("company") || "";
+  const initialQuestion =
+    searchParams.get("question") ||
+    "Tell me about yourself and why you're interested in this role.";
+
+  const [currentQuestion, setCurrentQuestion] = useState(initialQuestion);
+  const [answer, setAnswer] = useState("");
+  const [feedback, setFeedback] = useState(
+    "Listen to the question, then answer. Your evaluation will appear here."
+  );
+  const [score, setScore] = useState<number | null>(null);
+  const [scoreExplanation, setScoreExplanation] = useState<string>("");
+  const [strengths, setStrengths] = useState<string[]>([]);
+  const [weaknesses, setWeaknesses] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [canRetry, setCanRetry] = useState(false);
+  const [attemptsLeft, setAttemptsLeft] = useState(0);
+  const [pendingNextQuestion, setPendingNextQuestion] = useState<string | null>(null);
+  const [confidenceScore, setConfidenceScore] = useState<number | null>(null);
+  const [redFlags, setRedFlags] = useState<string[]>([]);
+  const [passesLeft, setPassesLeft] = useState<number>(3);
+  const [questionIndex, setQuestionIndex] = useState<number | null>(1);
+  const [totalQuestions, setTotalQuestions] = useState<number | null>(10);
+
+  const [audioReady, setAudioReady] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [audioMimeType, setAudioMimeType] = useState("audio/webm");
+  const [speechTranscript, setSpeechTranscript] = useState("");
+  const [recordingSavedFlash, setRecordingSavedFlash] = useState(false);
+  const [analysisSuccess, setAnalysisSuccess] = useState(false);
+  const [passNotice, setPassNotice] = useState(false);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const lastQuestionSpokenRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!sessionId) {
+      router.push("/interview/setup");
+    }
+  }, [sessionId, router]);
+
+  const sessionLineForHero = useMemo(
+    () =>
+      sessionQuestionContext.trim() ||
+      buildSessionContextLine({
+        profession,
+        difficulty,
+        focusArea,
+        sector,
+        company: targetCompany,
+      }),
+    [sessionQuestionContext, profession, difficulty, focusArea, sector, targetCompany]
+  );
+
+  const speakAloud = useCallback(async (text: unknown) => {
+    const plain = speakableText(text);
+    const fallbackSpeak = () => {
+      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+        return;
+      }
+      const utterance = new SpeechSynthesisUtterance(plain);
+      applyEnglishSpeechVoice(utterance);
+      utterance.pitch = 1;
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    };
+
+    try {
+      setIsSpeaking(true);
+
+      const res = await fetch(
+        `${API_BASE}/tts?text=${encodeURIComponent(plain.slice(0, 4000))}`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: buildAuthHeaders(),
+        }
+      );
+
+      if (!res.ok) {
+        fallbackSpeak();
+        return;
+      }
+
+      const data = await res.json();
+
+      if (!data?.audio_base64) {
+        fallbackSpeak();
+        return;
+      }
+
+      const audio = new Audio(`data:audio/mp3;base64,${data.audio_base64}`);
+
+      audio.onended = () => setIsSpeaking(false);
+      audio.onerror = () => setIsSpeaking(false);
+
+      await audio.play();
+    } catch {
+      fallbackSpeak();
+    }
+  }, []);
+
+  useEffect(() => {
+    const q = safeText(currentQuestion).trim();
+    if (!q) return;
+    if (lastQuestionSpokenRef.current === q) return;
+    lastQuestionSpokenRef.current = q;
+    void speakAloud(q);
+  }, [currentQuestion, speakAloud]);
+
+  const applyResponse = async (data: SubmitResponse) => {
+    const qc = typeof data.question_context === "string" ? data.question_context.trim() : "";
+    if (qc) {
+      setSessionQuestionContext(qc);
+    }
+    setFeedback(safeText(data.feedback, "Feedback unavailable."));
+    setScore(data.score ?? null);
+    setScoreExplanation(safeText(data.score_explanation));
+    setStrengths(
+      Array.isArray(data.strengths) ? data.strengths.map((x) => safeText(x)) : []
+    );
+    setWeaknesses(
+      Array.isArray(data.weaknesses) ? data.weaknesses.map((x) => safeText(x)) : []
+    );
+    setSuggestions(
+      Array.isArray(data.suggestions) ? data.suggestions.map((x) => safeText(x)) : []
+    );
+    setCanRetry(Boolean(data.can_retry));
+    setAttemptsLeft(Number(data.attempts_left || 0));
+    setPendingNextQuestion(
+      data.pending_next_question != null
+        ? safeText(data.pending_next_question)
+        : null
+    );
+    setConfidenceScore(
+      typeof data.confidence_score === "number" ? data.confidence_score : null
+    );
+    setRedFlags(
+      Array.isArray(data.red_flags) ? data.red_flags.map((x) => safeText(x)) : []
+    );
+    setPassesLeft(typeof data.passes_left === "number" ? data.passes_left : passesLeft);
+    setQuestionIndex(typeof data.question_index === "number" ? data.question_index : questionIndex);
+    setTotalQuestions(typeof data.total_questions === "number" ? data.total_questions : totalQuestions);
+
+    await speakAloud(data.feedback as unknown);
+
+    if (data.done) {
+      router.push(`/results/${sessionId}`);
+      return;
+    }
+
+    setAnswer("");
+    setRecordedBlob(null);
+    setSpeechTranscript("");
+  };
+
+  const handlePassQuestion = async () => {
+    try {
+      setLoading(true);
+      const res = await apiFetch("/interview/pass", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: Number(sessionId) }),
+      });
+      const data: SubmitResponse = await res.json();
+      const qc = typeof data.question_context === "string" ? data.question_context.trim() : "";
+      if (qc) {
+        setSessionQuestionContext(qc);
+      }
+      if (data.done) {
+        router.push(`/results/${sessionId}`);
+        return;
+      }
+      if (data.next_question) {
+        setCurrentQuestion(safeText(data.next_question));
+      }
+      setPendingNextQuestion(null);
+      setCanRetry(false);
+      setAttemptsLeft(0);
+      setFeedback(safeText(data.feedback, "Question passed."));
+      setScore(data.score ?? null);
+      setScoreExplanation(data.score_explanation || "");
+      setConfidenceScore(typeof data.confidence_score === "number" ? data.confidence_score : null);
+      setRedFlags(
+        Array.isArray(data.red_flags) ? data.red_flags.map((x) => safeText(x)) : []
+      );
+      setPassesLeft(typeof data.passes_left === "number" ? data.passes_left : passesLeft);
+      setQuestionIndex(typeof data.question_index === "number" ? data.question_index : questionIndex);
+      setTotalQuestions(typeof data.total_questions === "number" ? data.total_questions : totalQuestions);
+      setAnswer("");
+      setRecordedBlob(null);
+      setSpeechTranscript("");
+      setAnalysisSuccess(false);
+      setPassNotice(true);
+      window.setTimeout(() => setPassNotice(false), 5500);
+    } catch (error) {
+      console.error("Pass error:", error);
+      setFeedback("Pass failed. You may have used all pass rights.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitTextAnswer = async () => {
+    const res = await apiFetch("/interview/answer/text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: Number(sessionId), answer_text: answer }),
+    });
+    return res.json();
+  };
+
+  const startAudioRecording = async () => {
+    try {
+      const speechWindow = window as Window & {
+        SpeechRecognition?: SpeechRecognitionCtorLike;
+        webkitSpeechRecognition?: SpeechRecognitionCtorLike;
+      };
+      const SpeechRecognitionCtor =
+        speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+      if (SpeechRecognitionCtor) {
+        const recognition = new SpeechRecognitionCtor();
+        recognition.lang = "en-US";
+        recognition.interimResults = true;
+        recognition.continuous = true;
+        recognition.onresult = (event: SpeechResultEventLike) => {
+          let text = "";
+          for (let i = 0; i < event.results.length; i += 1) {
+            text += event.results[i][0]?.transcript || "";
+            text += " ";
+          }
+          setSpeechTranscript(text.trim());
+        };
+        recognitionRef.current = recognition;
+        recognition.start();
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const candidates = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+        "audio/mpeg",
+      ];
+      const chosenMime =
+        candidates.find((m) => MediaRecorder.isTypeSupported(m)) || "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType: chosenMime });
+
+      chunksRef.current = [];
+      mediaRecorderRef.current = recorder;
+      setAudioMimeType(chosenMime);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: chosenMime });
+        if (blob.size < 1500) {
+          setFeedback("Recording is too short or empty. Please record at least 2-3 seconds.");
+          setRecordedBlob(null);
+        } else {
+          setRecordedBlob(blob);
+          setRecordingSavedFlash(true);
+          window.setTimeout(() => setRecordingSavedFlash(false), 3500);
+        }
+        stream.getTracks().forEach((t) => t.stop());
+      };
+
+      recorder.start(250);
+      setRecording(true);
+      setAudioReady(true);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const stopAudioRecording = () => {
+    mediaRecorderRef.current?.stop();
+    try {
+      recognitionRef.current?.stop?.();
+    } catch {
+      // ignore
+    }
+    setRecording(false);
+  };
+
+  const submitAudioAnswer = async () => {
+    if (speechTranscript.trim()) {
+      const res = await apiFetch("/interview/answer/text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: Number(sessionId),
+          answer_text: speechTranscript.trim(),
+        }),
+      });
+      return res.json();
+    }
+
+    if (!recordedBlob) return null;
+
+    const filename = audioMimeType.includes("mp4")
+      ? "answer.m4a"
+      : audioMimeType.includes("mpeg")
+        ? "answer.mp3"
+        : "answer.webm";
+
+    const formData = new FormData();
+    formData.append("session_id", sessionId);
+    formData.append("audio", recordedBlob, filename);
+
+    const res = await apiFetch("/interview/answer/audio", {
+      method: "POST",
+      body: formData,
+    });
+
+    return res.json();
+  };
+
+  const handleSubmit = async () => {
+    try {
+      setLoading(true);
+      setAnalysisSuccess(false);
+
+      let data: SubmitResponse | null = null;
+
+      if (answer.trim()) {
+        data = await submitTextAnswer();
+      } else {
+        data = await submitAudioAnswer();
+        if (!data) return;
+      }
+
+      if (data) {
+        const willCompleteSession = Boolean(data.done);
+        await applyResponse(data);
+        if (!willCompleteSession) {
+          setAnalysisSuccess(true);
+          window.setTimeout(() => setAnalysisSuccess(false), 6000);
+        }
+      }
+    } catch (error) {
+      console.error("Submit error:", error);
+      setFeedback("An error occurred while submitting your answer.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const canSubmit =
+    Boolean(answer.trim()) ||
+    Boolean(speechTranscript.trim()) ||
+    Boolean(recordedBlob);
+
+  return (
+    <main className="min-h-screen">
+      <section className="container py-10">
+        <SessionControlBar
+          questionIndex={questionIndex}
+          totalQuestions={totalQuestions}
+          passesLeft={passesLeft}
+          retriesLeft={attemptsLeft}
+          mode={MODE}
+          focusArea={focusArea}
+          confidence={confidenceScore}
+          profession={profession}
+          sector={sector}
+          targetCompany={targetCompany}
+          difficulty={difficulty}
+          length={length}
+        />
+
+        <div className="mb-8 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <p className="text-sm uppercase tracking-[0.2em] text-cyan-300/80">Presence Interview</p>
+            <h1 className="section-title mt-2">{profession} — face-to-face simulation</h1>
+            <p className="mt-3 max-w-2xl text-slate-400">
+              A simple interviewer figure asks questions aloud. You respond in writing or by voice — no
+              webcam recording of you (unlike Video mode).
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href="/dashboard" className="btn-secondary">
+              Dashboard
+            </Link>
+            <Link href="/" className="btn-secondary">
+              Home
+            </Link>
+            <div className="glass flex items-center gap-3 rounded-full px-4 py-3">
+              <Circle size={12} className="fill-emerald-400 text-emerald-400" />
+              <span className="text-sm font-medium">Session Active</span>
+            </div>
+          </div>
+        </div>
+
+        <SessionStatsCards attemptsLeft={attemptsLeft} passesLeft={passesLeft} />
+
+        <InterviewQuestionHero
+          questionText={safeText(currentQuestion)}
+          contextLabel={sessionLineForHero}
+        />
+
+        <div className="page-grid">
+          <div className="glass panel flex min-h-0 flex-col">
+            <div className="mb-6 flex shrink-0 items-center gap-3">
+              <div className="rounded-2xl bg-violet-500/20 p-3">
+                <UserRound size={20} />
+              </div>
+              <div>
+                <div className="font-semibold">Interview room</div>
+                <div className="text-sm text-slate-300">Interviewer speaks · you answer below</div>
+              </div>
+            </div>
+
+            <div className="grid gap-8 lg:grid-cols-[minmax(0,240px)_minmax(0,1fr)]">
+              <div className="flex flex-col items-center gap-4">
+                <InterviewerAvatar speaking={isSpeaking} />
+                <p className="text-center text-xs font-medium uppercase tracking-wider text-slate-500">
+                  AI interviewer
+                </p>
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  disabled={loading || !currentQuestion.trim()}
+                  onClick={() => void speakAloud(safeText(currentQuestion))}
+                >
+                  <Volume2 size={16} />
+                  Hear question again
+                </button>
+              </div>
+
+              <div className="flex min-h-0 flex-col gap-5">
+                {passNotice && (
+                  <div className="flex shrink-0 items-start gap-3 rounded-2xl border border-amber-400/35 bg-amber-500/10 px-4 py-3 text-sm text-amber-50">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+                    <div>
+                      <div className="font-semibold text-amber-100">Question skipped (pass used)</div>
+                      <p className="mt-1 text-amber-100/90">
+                        Your pass was recorded. Continue when you are ready.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {recordingSavedFlash && (
+                  <div className="flex shrink-0 items-center gap-2 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" aria-hidden />
+                    <span>Recording captured — ready to submit.</span>
+                  </div>
+                )}
+
+                {analysisSuccess && (
+                  <div className="flex shrink-0 flex-col gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-50">
+                    <div className="flex items-center gap-2 font-medium">
+                      <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" aria-hidden />
+                      <span>Evaluated</span>
+                    </div>
+                    <p className="pl-7 text-emerald-100/95">See feedback in the coach panel →</p>
+                  </div>
+                )}
+
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <label className="label" htmlFor="presence-answer">
+                    Your answer
+                  </label>
+                  <textarea
+                    id="presence-answer"
+                    value={answer}
+                    onChange={(e) => setAnswer(e.target.value)}
+                    placeholder="Write your answer here, or use the microphone to dictate / record."
+                    className="textarea min-h-[min(40vh,420px)] w-full max-w-none text-base leading-relaxed"
+                    spellCheck
+                  />
+                </div>
+
+                <div className="card-soft p-5">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-200">
+                    <Mic size={16} />
+                    Optional: speak instead
+                  </div>
+                  <p className="mb-4 text-sm text-slate-400">
+                    Dictation fills the box above; or record audio for transcription (same as Audio mode).
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={startAudioRecording}
+                      disabled={recording || loading}
+                      className="btn-primary"
+                    >
+                      <Play size={16} />
+                      Start mic
+                    </button>
+                    <button
+                      type="button"
+                      onClick={stopAudioRecording}
+                      disabled={!recording || loading}
+                      className="btn-secondary"
+                    >
+                      <Square size={16} />
+                      Stop
+                    </button>
+                  </div>
+                  <div className="mt-3 text-sm text-slate-400">
+                    {recording
+                      ? "Listening…"
+                      : speechTranscript
+                        ? "Transcript ready (you can edit the text box)."
+                        : recordedBlob
+                          ? "Audio ready to submit."
+                          : audioReady
+                            ? "Mic ready."
+                            : "Mic not started."}
+                  </div>
+                  {!!speechTranscript && (
+                    <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">
+                      {speechTranscript}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 flex-wrap gap-3">
+                  <button
+                    onClick={handleSubmit}
+                    className="btn-primary"
+                    disabled={loading || !canSubmit}
+                    type="button"
+                  >
+                    <Send size={16} />
+                    {loading ? "Submitting…" : "Submit answer"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAnswer("");
+                      setRecordedBlob(null);
+                      setSpeechTranscript("");
+                    }}
+                    className="btn-secondary"
+                    type="button"
+                    disabled={loading}
+                  >
+                    Clear
+                  </button>
+                  <button onClick={handlePassQuestion} className="btn-secondary" type="button" disabled={loading}>
+                    Pass question (up to 3/session)
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <CoachPanel
+            mode={MODE}
+            score={score}
+            confidenceScore={confidenceScore}
+            feedback={feedback}
+            scoreExplanation={scoreExplanation}
+            canRetry={canRetry}
+            attemptsLeft={attemptsLeft}
+            pendingNextQuestion={pendingNextQuestion}
+            isSpeaking={isSpeaking}
+            strengths={strengths}
+            weaknesses={weaknesses}
+            suggestions={suggestions}
+            redFlags={redFlags}
+            onReplayVoice={() => {
+              void speakAloud(feedback);
+            }}
+            onContinueNextQuestion={() => {
+              if (!pendingNextQuestion) return;
+              setCurrentQuestion(pendingNextQuestion);
+              setPendingNextQuestion(null);
+              setCanRetry(false);
+              setAttemptsLeft(0);
+              setAnswer("");
+              setRecordedBlob(null);
+              setSpeechTranscript("");
+              setAnalysisSuccess(false);
+              setPassNotice(false);
+            }}
+          />
+        </div>
+      </section>
+    </main>
+  );
+}
+
+export default function PresenceInterviewPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen" />}>
+      <PresenceInterviewPageContent />
+    </Suspense>
+  );
+}
