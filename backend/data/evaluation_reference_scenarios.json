@@ -1,0 +1,35 @@
+[
+  {
+    "id": "behavioural_star",
+    "profession": "Product Manager",
+    "question": "Tell me about a time you had to align stakeholders under a tight deadline.",
+    "answer_excerpt": "We had three teams disagreeing on scope. I ran a 45-minute workshop, documented outcomes, and shipped a cut-down MVP in two weeks. Adoption went from 40% to 78% in six weeks.",
+    "expected_signals": [
+      "Should reward concrete structure (situation, action, result) and measurable outcome.",
+      "Should flag weak answers that lack metrics or clear ownership."
+    ],
+    "notes": "Human-written scenario for demo discussion; not an automated test oracle."
+  },
+  {
+    "id": "technical_deep_dive",
+    "profession": "Backend Developer",
+    "question": "How would you design idempotent payment webhooks?",
+    "answer_excerpt": "Store webhook idempotency keys in Postgres with a unique constraint, return 200 on duplicates, and process out-of-order events with a state machine. We use a dead-letter queue after three retries.",
+    "expected_signals": [
+      "Should credit technical depth: idempotency, consistency, retries.",
+      "Should penalize purely generic answers with no concrete trade-offs."
+    ],
+    "notes": "Use for jury Q&A on rubric alignment, not for regression assertions."
+  },
+  {
+    "id": "weak_answer",
+    "profession": "Frontend Developer",
+    "question": "Describe how you improved performance.",
+    "answer_excerpt": "I made it faster.",
+    "expected_signals": [
+      "Low score expected; feedback should ask for metrics, tools, and steps.",
+      "May trigger retry path if score < 85 and attempts remain."
+    ],
+    "notes": "Illustrates failure mode analysis without a labeled dataset."
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "description": "Hand-authored scenarios for defense / offline review. Not automated gold labels.",
+  "cases": [
+    {
+      "id": "strong_behavioral",
+      "question_type": "behavioral",
+      "expected_score_min": 65,
+      "expected_score_max": 95,
+      "notes": "Wide band because LLM variance; use reliability endpoint for tight checks."
+    },
+    {
+      "id": "weak_one_liner",
+      "question_type": "behavioral",
+      "expected_score_min": 25,
+      "expected_score_max": 70,
+      "notes": "Short answers should score lower on average."
+    }
+  ]
+}
